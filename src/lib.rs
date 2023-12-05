@@ -1,9 +1,9 @@
-use std::borrow::Cow;
 use base64::{engine::general_purpose, Engine};
 use chrono::{DateTime, Local, Utc};
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
-use reqwest::Request;
+use reqwest::{Request, RequestBuilder};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 #[derive(Default)]
 pub struct Builder {
@@ -58,7 +58,7 @@ impl Client {
             .build()
     }
 
-    pub async fn login(&self, username: &str,password: &str) -> String {
+    pub async fn login(&self, username: &str, password: &str) -> String {
         let url = format!(
             "https://{}/{}/prof/authUser",
             &self.builder.base_url, &self.builder.api_url
@@ -117,6 +117,92 @@ impl Client {
             .await
             .unwrap();
 
-        res.headers().get("sid").unwrap().to_str().unwrap().to_owned()
+        res.headers()
+            .get("sid")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
     }
+
+    pub async fn vehicles(&self, token: &str) -> Vec<Vehicle> {
+        let url = format!(
+            "https://{}/{}/ownr/gvl",
+            &self.builder.base_url, &self.builder.api_url
+        );
+        let client = reqwest::Client::new();
+        let res = self
+            .headers(client.get(url))
+            .header("sid", token)
+            .send()
+            .await
+            .unwrap();
+
+        let json: Vehicles = res.json().await.unwrap();
+        json.payload.vehicle_summary
+    }
+
+    fn headers(&self, req: RequestBuilder) -> RequestBuilder {
+        let local_time = Local::now();
+        let offset = local_time.offset().local_minus_utc() / 3600;
+
+        let utc_time: DateTime<Utc> = Utc::now();
+        let formatted_date = utc_time.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+
+        fn generate_device_id() -> String {
+            let random_chars: String = thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(22)
+                .map(char::from)
+                .collect();
+
+            let token = general_purpose::URL_SAFE_NO_PAD.encode(&random_chars);
+
+            format!("{}:{}", random_chars, token)
+        }
+
+        req.header("content-type", "application/json;charset=UTF-8")
+            .header("accept", "application/json, text/plain, */*")
+            .header("accept-encoding", "gzip, deflate, br")
+            .header("accept-language", "en-US,en;q=0.9")
+            .header("apptype", "L")
+            .header("appversion", "4.10.0")
+            .header("clientid", "MWAMOBILE")
+            .header("from", "SPA")
+            .header("host", &*self.builder.base_url)
+            .header("language", "0")
+            .header("offset", offset.to_string())
+            .header("ostype", "Android")
+            .header("osversion", "11")
+            .header("secretkey", "98er-w34rf-ibf3-3f6h")
+            .header("to", "APIGW")
+            .header("tokentype", "G")
+            .header("user-agent", "okhttp/3.12.1")
+            .header("date", formatted_date)
+            .header("deviceid", generate_device_id())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Vehicles {
+    payload: VehiclesPayload,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VehiclesPayload {
+    vehicle_summary: Vec<Vehicle>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Vehicle {
+    pub nick_name: String,
+    pub model_name: String,
+    pub trim: String,
+    pub vin: String,
+    pub mileage: String,
+    pub vehicle_key: String,
+    pub vehicle_identifier: String,
 }
