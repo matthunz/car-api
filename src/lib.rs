@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose, Engine};
 use chrono::{DateTime, Local, Utc};
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
-use reqwest::{Request, RequestBuilder};
+use reqwest::RequestBuilder;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, time::Duration};
 

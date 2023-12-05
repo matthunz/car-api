@@ -2,5 +2,7 @@
 HTTP client for web-enabled vehicles.
 
 ## Services
- - KIA Connect
- - Hyundai EVO
+ - Kia UVO
+ - Hyundai Bluelink
+ - Genesis Connect
+
