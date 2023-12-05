@@ -3,7 +3,7 @@ use chrono::{DateTime, Local, Utc};
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use reqwest::{Request, RequestBuilder};
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
+use std::{borrow::Cow, time::Duration};
 
 #[derive(Default)]
 pub struct Builder {
@@ -142,6 +142,115 @@ impl Client {
         json.payload.vehicle_summary
     }
 
+    pub async fn lock(&self, session_key: &str, vehicle_key: &str) {
+        let action_key = self.start_lock(session_key, vehicle_key).await;
+
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            let status = self
+                .check_status(session_key, vehicle_key, &action_key)
+                .await;
+            if status.remote_status == 0 {
+                break;
+            }
+        }
+    }
+
+    pub async fn unlock(&self, session_key: &str, vehicle_key: &str) {
+        let action_key = self.start_unlock(session_key, vehicle_key).await;
+
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            let status = self
+                .check_status(session_key, vehicle_key, &action_key)
+                .await;
+            if status.remote_status == 0 {
+                break;
+            }
+        }
+    }
+
+    pub async fn start_lock(&self, session_key: &str, vehicle_key: &str) -> String {
+        let client = reqwest::Client::new();
+        let url = format!(
+            "https://{}/{}/rems/door/lock",
+            &self.builder.base_url, &self.builder.api_url
+        );
+        let res = self
+            .headers(client.get(url))
+            .header("sid", session_key)
+            .header("vinkey", vehicle_key)
+            .send()
+            .await
+            .unwrap();
+
+        res.headers()
+            .get("xid")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    pub async fn start_unlock(&self, session_key: &str, vehicle_key: &str) -> String {
+        let client = reqwest::Client::new();
+        let url = format!(
+            "https://{}/{}/rems/door/unlock",
+            &self.builder.base_url, &self.builder.api_url
+        );
+        let res = self
+            .headers(client.get(url))
+            .header("sid", session_key)
+            .header("vinkey", vehicle_key)
+            .send()
+            .await
+            .unwrap();
+
+        res.headers()
+            .get("xid")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    pub async fn check_status(
+        &self,
+        session_key: &str,
+        vehicle_key: &str,
+        action_key: &str,
+    ) -> Status {
+        let client = reqwest::Client::new();
+        let url = format!(
+            "https://{}/{}/cmm/gts",
+            &self.builder.base_url, &self.builder.api_url
+        );
+
+        #[derive(Serialize)]
+        struct StatusData<'a> {
+            xid: &'a str,
+        }
+
+        let data = StatusData { xid: action_key };
+
+        let res = self
+            .headers(client.post(url))
+            .header("sid", session_key)
+            .header("vinkey", vehicle_key)
+            .json(&data)
+            .send()
+            .await
+            .unwrap();
+
+        #[derive(Deserialize)]
+        struct StatusResponse {
+            payload: Status,
+        }
+
+        let json: StatusResponse = res.json().await.unwrap();
+        json.payload
+    }
+
     fn headers(&self, req: RequestBuilder) -> RequestBuilder {
         let local_time = Local::now();
         let offset = local_time.offset().local_minus_utc() / 3600;
@@ -205,4 +314,14 @@ pub struct Vehicle {
     pub mileage: String,
     pub vehicle_key: String,
     pub vehicle_identifier: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Status {
+    alert_status: u8,
+    remote_status: u8,
+    ev_status: u8,
+    location_status: u8,
+    cal_sync_status: u8,
 }
